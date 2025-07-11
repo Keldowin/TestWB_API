@@ -1,6 +1,9 @@
 import requests
 import os
-from dotenv import load_dotenv, dotenv_values
+from dotenv import load_dotenv
+
+from dataclasses import dataclass
+from typing import Optional
 
 load_dotenv()
 
@@ -61,7 +64,7 @@ class WBMarketPlaceAPI(WBAPI):
     # https://dev.wildberries.ru/openapi/orders-fbs#tag/Postavki-FBS/paths/~1api~1v3~1supplies/get
     def get_supplies(self,
                      limit: int = 1,
-                     next: int = 0) -> dict:
+                     next: int = 0) -> list['Supply']:
         """Получение списка поставок
 
         Args:
@@ -77,7 +80,20 @@ class WBMarketPlaceAPI(WBAPI):
                                                  'next': next})
 
         if status:
-            return response
+            supplies = [
+                Supply(
+                    id=supply['id'],
+                    done=supply['done'],
+                    created_at=supply['createdAt'],
+                    closed_at=supply['closedAt'],
+                    scan_dt=supply['scanDt'],
+                    name=supply['name'],
+                    cargo_type=supply['cargoType']
+                )
+                for supply in response.get("supplies", [])
+            ]
+
+            return supplies
         else:
             print(f'Ошибка в получении поставок, {str(response)}')
 
@@ -86,7 +102,7 @@ class WBMarketPlaceAPI(WBAPI):
     # Получение информации о поставке по supplyId
     # https://dev.wildberries.ru/openapi/orders-fbs#tag/Postavki-FBS/paths/~1api~1v3~1supplies~1%7BsupplyId%7D/get
     def get_supply(self,
-                   supplyId: str) -> dict:
+                   supplyId: str) -> "Supply":
         """Получение информации об одной поставке по supplyId
 
         Args:
@@ -99,7 +115,17 @@ class WBMarketPlaceAPI(WBAPI):
         status, response = self._request(f'/v3/supplies/{supplyId}')
 
         if status:
-            return response
+            supply = Supply(
+                id=response['id'],
+                done=response['done'],
+                created_at=response['createdAt'],
+                closed_at=response['closedAt'],
+                scan_dt=response['scanDt'],
+                name=response['name'],
+                cargo_type=response['cargoType']
+            )
+
+            return supply
         else:
             print(f'Ошибка в получении информации о поставке, {str(response)}')
 
@@ -118,8 +144,8 @@ class WBSuppliesAPI(WBAPI):
 
     # Получение коэф. приёмки
     # https://dev.wildberries.ru/openapi/orders-fbw#tag/Postavki/paths/~1api~1v1~1acceptance~1coefficients/get
-    def get_coefficients(self,
-                         warehouseIDs: str = '') -> dict:
+    def get_coefficients_warehouses(self,
+                                    warehouseIDs: str = '') -> list["SortingCenter"]:
         """Получение списка складов и их коэффициентов приёмки
 
         Args:
@@ -129,16 +155,26 @@ class WBSuppliesAPI(WBAPI):
             dict: Список складов и их коэф. приёмки
         """
 
-        if warehouseIDs:
-            status, response = self._request('/v1/acceptance/coefficients',
-                                             params={
-                                                 'warehouseIDs': warehouseIDs
-                                                 })
-        else:
-            status, response = self._request('/v1/acceptance/coefficients')
+        status, response = self._request('/v1/acceptance/coefficients',
+                                         params={'warehouseIDs': warehouseIDs}
+                                         if warehouseIDs else None,)
 
         if status:
-            return response
+            sorting_center = [
+                SortingCenter(
+                    date=center["date"],
+                    coefficient=center.get("coefficient"),
+                    warehouse_id=center["warehouseID"],
+                    warehouse_name=center["warehouseName"],
+                    allow_unload=center["allowUnload"],
+                    box_type_name=center["boxTypeName"],
+                    box_type_id=center["boxTypeID"],
+                    is_sorting_center=center["isSortingCenter"]
+                )
+                for center in response
+            ]
+
+            return sorting_center
         else:
             print(f'Ошибка в получении коэф. поставки, {str(response)}')
 
@@ -146,7 +182,7 @@ class WBSuppliesAPI(WBAPI):
 
     # Получение складов приёмки
     # https://dev.wildberries.ru/openapi/orders-fbw#tag/Postavki/paths/~1api~1v1~1warehouses/get
-    def get_warehouses(self) -> dict:
+    def get_warehouses(self) -> list["Warehouse"]:
         """Получение складов приёмки
 
         Returns:
@@ -155,16 +191,113 @@ class WBSuppliesAPI(WBAPI):
         status, response = self._request('/v1/warehouses')
 
         if status:
-            return response
+            warehouses = [
+                Warehouse(
+                    id=wh["ID"],
+                    name=wh["name"],
+                    address=wh["address"],
+                    work_time=wh["workTime"],
+                    accepts_qr=wh["acceptsQR"],
+                    is_active=wh["isActive"],
+                    is_transit_active=wh["isTransitActive"]
+                )
+                for wh in response
+            ]
+
+            return warehouses
         else:
             print(f'Ошибка в получении списка складов, {str(response)}')
 
             return {}
 
-supply_requests = WBMarketPlaceAPI(WB_API)
+    # Получение складов по их имени
+    def get_warehouses_by_name(self, name_filter: str) -> list["Warehouse"]:
+        """Получение списка складов по определённому имени,
+        для дальнейшего использования получения коэф. приёмки
 
-print(supply_requests.get_supplies(limit=4))
+        Returns:
+            Warehouse filtered: Отфильтрованный список складов с id
+        """
+        warehouses: list["Warehouse"] = self.get_warehouses()
 
-warehouses = WBSuppliesAPI(WB_API)
+        filtered = [
+            warehouse
+            for warehouse in warehouses
+            if name_filter.lower() in warehouse.name.lower()
+        ]
 
-print(warehouses.get_warehouses())
+        return filtered
+
+
+# Дата классы для удобного описания каждого объекта возвращаемого API
+@dataclass
+class Supply:
+    id: str
+    done: bool
+    created_at: str
+    closed_at: str
+    scan_dt: str
+    name: str
+    cargo_type: int
+
+
+@dataclass
+class SortingCenter:
+    date: str
+    coefficient: Optional[float]
+    warehouse_id: int
+    warehouse_name: str
+    allow_unload: bool
+    box_type_name: str
+    box_type_id: int
+    is_sorting_center: bool
+
+
+@dataclass
+class Warehouse:
+    id: int
+    name: str
+    address: str
+    work_time: str
+    accepts_qr: bool
+    is_active: bool
+    is_transit_active: bool
+
+
+### ПРОВЕРКА!
+supplies_api = WBMarketPlaceAPI(WB_API)
+warehouses_api = WBSuppliesAPI(WB_API)
+
+# Получить все поставки
+supplies = supplies_api.get_supplies(limit=4)
+print(supplies)
+
+print('================')
+
+# Получить конкретную поставку
+supply = supplies_api.get_supply(supplyId="WB-GI-166688565") # Поставка Test supply_1
+print(supply)
+
+print('======== ДРУГОЙ КЛАСС ========')
+
+# Поиск сортировочных центров по имени
+centers = warehouses_api.get_warehouses_by_name("Брянск")
+print(centers)
+
+print('================')
+
+# Получить все склады
+warehouses = warehouses_api.get_warehouses()
+print(warehouses)
+
+print('================')
+
+# Получить все склады и их коэф. приёмки
+coef = warehouses_api.get_coefficients_warehouses()
+print(coef)
+
+print('================')
+
+# Получить опред склады и их коэф по warehousesIDS
+coef_filtered = warehouses_api.get_coefficients_warehouses(warehouseIDs='302988,215020,301760')
+print(coef_filtered)
