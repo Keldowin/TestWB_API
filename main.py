@@ -228,6 +228,27 @@ class WBSuppliesAPI(WBAPI):
 
         return filtered
 
+    # Получение желаемых складов приёмки, доступные для отправки и с нужным коэф. приёмки
+    def get_available_coefficients_warehouses(self,
+                                              coefficient: float,
+                                              warehouse_name: str = '') -> list["SortingCenter"]:
+        warehouses: list["SortingCenter"] = self.get_coefficients_warehouses()
+
+        filtered_warehouses: list["SortingCenter"] = []
+
+        for warehouse in warehouses:
+            if not warehouse.allow_unload \
+               or warehouse.coefficient != coefficient:
+                continue
+
+            if warehouse_name.lower() != warehouse.warehouse_name.lower():
+                continue
+
+            filtered_warehouses.append(warehouse)
+
+        return filtered_warehouses
+
+
 
 # Дата классы для удобного описания каждого объекта возвращаемого API
 @dataclass
@@ -268,9 +289,9 @@ class Warehouse:
 supplies_api = WBMarketPlaceAPI(WB_API)
 warehouses_api = WBSuppliesAPI(WB_API)
 
-# Получить все поставки
-supplies = supplies_api.get_supplies(limit=4)
-print(supplies)
+# # Получить все поставки
+# supplies = supplies_api.get_supplies(limit=4)
+# print(supplies)
 
 print('================')
 
@@ -301,3 +322,7 @@ print('================')
 # Получить опред склады и их коэф по warehousesIDS
 coef_filtered = warehouses_api.get_coefficients_warehouses(warehouseIDs='302988,215020,301760')
 print(coef_filtered)
+
+# Склады уд. коэф приёмки
+available_warehouses = warehouses_api.get_available_coefficients_warehouses(1, 'Коледино')
+print(available_warehouses)
